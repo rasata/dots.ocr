@@ -1,3 +1,7 @@
+/mpy
+/mpy/*
+mpy/*
+
 # Byte-compiled / optimized / DLL files
 weights/
 __pycache__/
