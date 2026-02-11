@@ -38,7 +38,8 @@ def inference(image_path, prompt, model, processor):
         return_tensors="pt",
     )
 
-    inputs = inputs.to("cuda")
+    device = next(model.parameters()).device
+    inputs = inputs.to(device)
 
     # Inference: Generation of the output
     generated_ids = model.generate(**inputs, max_new_tokens=24000)
@@ -52,16 +53,30 @@ def inference(image_path, prompt, model, processor):
 
 
 
+def get_device_config():
+    """Detect the best available device and return (device, dtype, attn_implementation)."""
+    if torch.cuda.is_available():
+        return "cuda", torch.bfloat16, "flash_attention_2"
+    elif torch.backends.mps.is_available():
+        return "mps", torch.float16, "sdpa"
+    else:
+        return "cpu", torch.float32, "sdpa"
+
+
 if __name__ == "__main__":
-    # We recommend enabling flash_attention_2 for better acceleration and memory saving, especially in multi-image and video scenarios.
+    device, dtype, attn_impl = get_device_config()
+    print(f"Using device: {device}, dtype: {dtype}, attention: {attn_impl}")
+
     model_path = "./weights/DotsOCR"
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
-        attn_implementation="flash_attention_2",
-        torch_dtype=torch.bfloat16,
-        device_map="auto",
+        attn_implementation=attn_impl,
+        torch_dtype=dtype,
+        device_map="auto" if device == "cuda" else None,
         trust_remote_code=True
     )
+    if device != "cuda":
+        model = model.to(device)
     processor = AutoProcessor.from_pretrained(model_path,  trust_remote_code=True)
 
     image_path = "demo/demo_image1.jpg"

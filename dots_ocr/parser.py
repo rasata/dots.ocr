@@ -59,19 +59,54 @@ class DotsOCRParser:
         assert self.min_pixels is None or self.min_pixels >= MIN_PIXELS
         assert self.max_pixels is None or self.max_pixels <= MAX_PIXELS
 
+    def _get_device_config(self):
+        """Detect the best available device and return (device, dtype, attn_implementation)."""
+        import torch
+        if torch.cuda.is_available():
+            return "cuda", torch.bfloat16, "flash_attention_2"
+        elif torch.backends.mps.is_available():
+            return "mps", torch.float16, "eager"
+        else:
+            return "cpu", torch.float32, "eager"
+
     def _load_hf_model(self):
         import torch
         from transformers import AutoModelForCausalLM, AutoProcessor, AutoTokenizer
         from qwen_vl_utils import process_vision_info
 
+        self.device, dtype, attn_impl = self._get_device_config()
+        print(f"Using device: {self.device}, dtype: {dtype}, attention: {attn_impl}")
+
+        # On MPS, cap image resolution to limit attention memory usage.
+        # 1.7B model in float16 = ~3.4 GB; leaves room for activations.
+        if self.device == "mps":
+            import os
+            os.environ.setdefault("PYTORCH_MPS_HIGH_WATERMARK_RATIO", "0.0")
+            if self.max_pixels is None or self.max_pixels > 1003520:
+                self.max_pixels = 1003520  # ~1 megapixel (divisible by 28)
+                print(f"MPS: capping max_pixels to {self.max_pixels} to fit in memory")
+
         model_path = "./weights/DotsOCR"
         self.model = AutoModelForCausalLM.from_pretrained(
             model_path,
-            attn_implementation="flash_attention_2",
-            torch_dtype=torch.bfloat16,
-            device_map="auto",
+            attn_implementation=attn_impl,
+            torch_dtype=dtype,
+            device_map="auto" if self.device == "cuda" else None,
             trust_remote_code=True
         )
+        if self.device != "cuda":
+            self.model = self.model.to(self.device)
+            # The vision tower's forward() defaults to bf16=True, which casts
+            # inputs to bfloat16. This is incompatible with MPS/CPU.
+            # Patch it to cast inputs to the model's dtype instead.
+            import functools
+            model_dtype = dtype
+            original_vt_forward = self.model.vision_tower.forward
+            @functools.wraps(original_vt_forward)
+            def _patched_vt_forward(hidden_states, grid_thw, bf16=False):
+                hidden_states = hidden_states.to(model_dtype)
+                return original_vt_forward(hidden_states, grid_thw, bf16=False)
+            self.model.vision_tower.forward = _patched_vt_forward
         self.processor = AutoProcessor.from_pretrained(model_path,  trust_remote_code=True,use_fast=True)
         self.process_vision_info = process_vision_info
 
@@ -104,7 +139,7 @@ class DotsOCRParser:
             return_tensors="pt",
         )
 
-        inputs = inputs.to("cuda")
+        inputs = inputs.to(self.device)
 
         # Inference: Generation of the output
         generated_ids = self.model.generate(**inputs, max_new_tokens=24000)

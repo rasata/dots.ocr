@@ -991,6 +991,28 @@ This is an inhouse benchmark which contain 1493 pdf images with 100 languages.
 
 
 
+# Hardware Requirements
+
+| Component | Requirement |
+|-----------|-------------|
+| **GPU** | NVIDIA GPU with CUDA support (required) |
+| **VRAM** | >= 4 GB (8 GB+ recommended for optimal performance) |
+| **CUDA** | >= 12.x (12.8 recommended) |
+| **Driver** | NVIDIA driver compatible with your CUDA version |
+| **RAM** | >= 16 GB |
+| **OS** | Linux (recommended), or any OS with NVIDIA CUDA support |
+
+> **Why is an NVIDIA GPU required?**
+> dots.ocr relies on CUDA-dependent components at every level:
+> - **vLLM** (recommended inference backend) requires NVIDIA GPU
+> - **flash-attn** (used by the HuggingFace backend) is CUDA-only
+> - The model performs inference on GPU via `torch.cuda`
+>
+> **CPU inference:** An experimental CPU-only mode exists via HuggingFace Transformers (see [CPU inference guide](https://github.com/rednote-hilab/dots.ocr/issues/1#issuecomment-3148962536)), but it is significantly slower and not recommended for production use.
+>
+> **Apple Silicon (M1/M2/M3/M4):** Not currently supported. The required dependencies (`flash-attn`, `vLLM`) do not run on macOS/ARM.
+
+
 # Quick Start
 ## 1. Installation
 ### Install dots.ocr
